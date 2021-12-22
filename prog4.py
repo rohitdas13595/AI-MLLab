@@ -1,127 +1,74 @@
 import numpy as np
-import math
-import csv
+import pandas as pd
+eps = np.finfo(float).eps
+#print(eps)
+from numpy import log2 as log
+outlook = 'overcast,overcast,overcast,overcast,rainy,rainy,rainy,rainy,rainy,sunny,sunny,sunny,sunny,sunny'.split(',')
+temp = 'hot,cool,mild,hot,mild,cool,cool,mild,mild,hot,hot,mild,cool,mild'.split(',')
+humidity = 'high,normal,high,normal,high,normal,normal,normal,high,high,high,high,normal,normal'.split(',')
+windy = 'FALSE,TRUE,TRUE,FALSE,FALSE,FALSE,TRUE,FALSE,TRUE,FALSE,TRUE,FALSE,FALSE,TRUE'.split(',')
+play = 'yes,yes,yes,yes,yes,yes,no,yes,no,no,no,no,yes,yes'.split(',')
+dataset ={'outlook':outlook,'temp':temp,'humidity':humidity,'windy':windy,'play':play}
+df = pd.DataFrame(dataset,columns=['outlook','temp','humidity','windy','play'])
+print(df)
+def find_entropy(df):
+    Class = df.keys()[-1] #To make the code generic, changing target variable class name
+    entropy = 0
+    values = df[Class].unique()
+    for value in values:
+        fraction = df[Class].value_counts()[value]/len(df[Class])
+        entropy += -fraction*np.log2(fraction)
+    return entropy
+ 
+ 
+def find_entropy_attribute(df,attribute):
+    Class = df.keys()[-1] #To make the code generic, changing target variable class name
+    target_variables = df[Class].unique() #This gives all 'Yes' and 'No'
+    variables = df[attribute].unique() #This gives different features in that attribute (like 'Hot','Cold' in Temperature)
+    entropy2 = 0
+    for variable in variables:
+        entropy = 0
+        for target_variable in target_variables:
+            num = len(df[attribute][df[attribute]==variable][df[Class] ==target_variable])
+            den = len(df[attribute][df[attribute]==variable])
+            fraction = num/(den+eps)
+            entropy += -fraction*log(fraction+eps)
+        fraction2 = den/len(df)
+        entropy2 += -fraction2*entropy
+    return abs(entropy2)
 
-def read_data(filename):
-    with open(filename, 'r') as csvfile:
-        datareader = csv.reader(csvfile, delimiter=',')
-        headers = next(datareader)
-        metadata = []
-        traindata = []
-        for name in headers:
-            metadata.append(name)
-        for row in datareader:
-            traindata.append(row)
+def find_winner(df):
+    Entropy_att = []
+    IG = []
+    for key in df.keys()[:-1]:
+    # Entropy_att.append(find_entropy_attribute(df,key))
+        IG.append(find_entropy(df)-find_entropy_attribute(df,key))
+    return df.keys()[:-1][np.argmax(IG)]
 
-    return (metadata, traindata)
+def get_subtable(df, node,value):
+    return df[df[node] == value].reset_index(drop=True)
 
-class Node:
-    def __init__(self, attribute):
-        self.attribute = attribute
-        self.children = []
-        self.answer = ""
-        
-    def __str__(self):
-        return self.attribute
-
-def subtables(data, col, delete):
-    dict = {}
-    items = np.unique(data[:, col])
-    count = np.zeros((items.shape[0], 1), dtype=np.int32)    
+def buildTree(df,tree=None): 
+    Class = df.keys()[-1] 
     
-    for x in range(items.shape[0]):
-        for y in range(data.shape[0]):
-            if data[y, col] == items[x]:
-                count[x] += 1
-                
-    for x in range(items.shape[0]):
-        dict[items[x]] = np.empty((int(count[x]), data.shape[1]), dtype="|S32")
-        pos = 0
-        for y in range(data.shape[0]):
-            if data[y, col] == items[x]:
-                dict[items[x]][pos] = data[y]
-                pos += 1       
-        if delete:
-            dict[items[x]] = np.delete(dict[items[x]], col, 1)
-        
-    return items, dict
-
-def entropy(S):
-    items = np.unique(S)
-
-    if items.size == 1:
-        return 0
-    
-    counts = np.zeros((items.shape[0], 1))
-    sums = 0
-    
-    for x in range(items.shape[0]):
-        counts[x] = sum(S == items[x]) / (S.size * 1.0)
-
-    for count in counts:
-        sums += -1 * count * math.log(count, 2)
-    return sums
-
-def gain_ratio(data, col):
-    items, dict = subtables(data, col, delete=False) 
-                
-    total_size = data.shape[0]
-    entropies = np.zeros((items.shape[0], 1))
-    intrinsic = np.zeros((items.shape[0], 1))
-    
-    for x in range(items.shape[0]):
-        ratio = dict[items[x]].shape[0]/(total_size * 1.0)
-        entropies[x] = ratio * entropy(dict[items[x]][:, -1])
-        intrinsic[x] = ratio * math.log(ratio, 2)
-        
-    total_entropy = entropy(data[:, -1])
-    iv = -1 * sum(intrinsic)
-    
-    for x in range(entropies.shape[0]):
-        total_entropy -= entropies[x]
-        
-    return total_entropy / iv
-
-def create_node(data, metadata):
-    if (np.unique(data[:, -1])).shape[0] == 1:
-        node = Node("")
-        node.answer = np.unique(data[:, -1])[0]
-        return node
-        
-    gains = np.zeros((data.shape[1] - 1, 1))
-    
-    for col in range(data.shape[1] - 1):
-        gains[col] = gain_ratio(data, col)
-        
-    split = np.argmax(gains)
-    
-    node = Node(metadata[split])    
-    metadata = np.delete(metadata, split, 0)    
-    
-    items, dict = subtables(data, split, delete=True)
-    
-    for x in range(items.shape[0]):
-        child = create_node(dict[items[x]], metadata)
-        node.children.append((items[x], child))
-    
-    return node
-
-def empty(size):
-    s = ""
-    for x in range(size):
-        s += "   "
-    return s
-
-def print_tree(node, level):
-    if node.answer != "":
-        print(empty(level), node.answer)
-        return
-    print(empty(level), node.attribute)
-    for value, n in node.children:
-        print(empty(level + 1), value)
-        print_tree(n, level + 2)
-
-metadata, traindata = read_data("tennisdata.csv")
-data = np.array(traindata)
-node = create_node(data, metadata)
-print_tree(node, 0)
+    #Get attribute with maximum information gain
+    node = find_winner(df)
+    attValue = np.unique(df[node])
+    if tree is None: 
+        tree={}
+        tree[node] = {}
+    for value in attValue:
+ 
+        subtable = get_subtable(df,node,value)
+ 
+        clValue,counts = np.unique(subtable[Class],return_counts=True) 
+ 
+        if len(counts)==1:
+            tree[node][value] = clValue[0] 
+        else: 
+            tree[node][value] = buildTree(subtable) #Calling the function recursively 
+ 
+    return tree 
+t=buildTree(df)
+import pprint
+pprint.pprint(t)
